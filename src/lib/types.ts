@@ -1,6 +1,6 @@
 export type BotRole = 'owner' | 'user';
 export type BotUserStatus = 'active' | 'revoked';
-export type UserStateKind = 'idle' | 'awaiting_add_mail' | 'awaiting_broadcast';
+export type UserStateKind = 'idle' | 'awaiting_add_mail' | 'awaiting_import_confirm' | 'awaiting_broadcast';
 
 export interface BotUser {
   id: string;

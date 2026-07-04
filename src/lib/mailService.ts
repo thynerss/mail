@@ -13,6 +13,14 @@ export interface ImportSummary {
   failed: Array<{ email: string; reason: string }>;
 }
 
+export interface ImportPreview {
+  parse: ParseResult;
+  existingEmails: string[];
+  remainingSlots: number;
+  willInsert: number;
+  overLimit: number;
+}
+
 export interface CheckedMessage {
   message: GraphMessage;
   codeHit: ReturnType<typeof detectCode>;
@@ -43,6 +51,37 @@ export async function logEvent(input: {
     message: input.message ?? null,
     raw: input.raw ?? {}
   });
+}
+
+
+export async function previewMailImport(user: BotUser, text: string): Promise<ImportPreview> {
+  const parse = parseMailBulk(text, env.MAX_IMPORT_PER_BATCH);
+
+  const { count, error: countError } = await supabase
+    .from('mail_accounts')
+    .select('*', { count: 'exact', head: true })
+    .eq('owner_user_id', user.id)
+    .is('deleted_at', null);
+  if (countError) throw countError;
+
+  const remainingSlots = Math.max(0, env.MAX_MAIL_PER_USER - (count ?? 0));
+  const emails = parse.valid.map((x) => x.email);
+  let existingEmails: string[] = [];
+  if (emails.length > 0) {
+    const { data, error } = await supabase
+      .from('mail_accounts')
+      .select('email')
+      .eq('owner_user_id', user.id)
+      .is('deleted_at', null)
+      .in('email', emails);
+    if (error) throw error;
+    existingEmails = (data ?? []).map((row: { email: string }) => row.email);
+  }
+
+  const newCount = Math.max(0, parse.valid.length - existingEmails.length);
+  const willInsert = Math.min(newCount, remainingSlots);
+  const overLimit = Math.max(0, newCount - remainingSlots);
+  return { parse, existingEmails, remainingSlots, willInsert, overLimit };
 }
 
 export async function importMailAccounts(user: BotUser, text: string): Promise<ImportSummary> {
@@ -349,4 +388,5 @@ export async function cleanupOldData() {
   const oldLogs = new Date(Date.now() - 14 * 24 * 60 * 60 * 1000).toISOString();
   await supabase.from('check_events').delete().lt('created_at', oldChecks);
   await supabase.from('bot_logs').delete().lt('created_at', oldLogs);
+  await supabase.from('telegram_message_logs').delete().lt('created_at', oldLogs);
 }

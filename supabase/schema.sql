@@ -1,5 +1,5 @@
--- Outlook Mail Center Bot VIP v1.0
--- Run this file in Supabase SQL Editor.
+-- Outlook Mail Center Bot VIP v1.2
+-- Run this file in Supabase SQL Editor after reset_schema.sql for a clean install.
 
 create extension if not exists pgcrypto;
 
@@ -19,7 +19,7 @@ exception when duplicate_object then null;
 end $$;
 
 do $$ begin
-  create type user_state_kind as enum ('idle', 'awaiting_add_mail', 'awaiting_broadcast');
+  create type user_state_kind as enum ('idle', 'awaiting_add_mail', 'awaiting_import_confirm', 'awaiting_broadcast');
 exception when duplicate_object then null;
 end $$;
 
@@ -96,6 +96,21 @@ create table if not exists check_events (
 );
 
 create index if not exists idx_check_events_user_created on check_events(owner_user_id, created_at desc);
+create index if not exists idx_check_events_account_created on check_events(account_id, created_at desc);
+
+create table if not exists telegram_message_logs (
+  id uuid primary key default gen_random_uuid(),
+  owner_user_id uuid references bot_users(id) on delete set null,
+  chat_id bigint not null,
+  message_id bigint not null,
+  direction text not null check (direction in ('bot', 'user')),
+  purpose text,
+  created_at timestamptz not null default now(),
+  deleted_at timestamptz,
+  unique(chat_id, message_id)
+);
+
+create index if not exists idx_telegram_logs_chat_created on telegram_message_logs(chat_id, created_at desc) where deleted_at is null;
 
 create table if not exists bot_logs (
   id uuid primary key default gen_random_uuid(),
@@ -137,5 +152,5 @@ create trigger trg_mail_accounts_updated_at
 before update on mail_accounts
 for each row execute function set_updated_at();
 
--- RLS is optional here because this project uses SUPABASE_SERVICE_ROLE_KEY server-side only.
--- Do not expose the service role key to client/browser code.
+-- RLS is intentionally not enabled because this bot only uses SUPABASE_SERVICE_ROLE_KEY server-side.
+-- Never expose SUPABASE_SERVICE_ROLE_KEY in browser/client code or public GitHub files.

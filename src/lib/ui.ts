@@ -1,7 +1,7 @@
 import { env } from './env';
 import { escapeHtml, keyboard } from './telegram';
 import type { BotUser, GraphMessage, MailAccount } from './types';
-import type { CheckedMessage, CheckResult, ImportSummary } from './mailService';
+import type { CheckedMessage, CheckResult, ImportSummary, ImportPreview } from './mailService';
 
 function fmtDate(value?: string | null): string {
   if (!value) return '—';
@@ -18,7 +18,7 @@ export function mainMenu(user: BotUser, stats?: { mailCount?: number }) {
   const text = [
     '📬 <b>OUTLOOK MAIL CENTER</b>',
     '',
-    `👤 User: <b>${escapeHtml(user.username ? '@' + user.username : user.first_name ?? user.telegram_id)}</b>`,
+    `👤 User: <b>${escapeHtml(String(user.username ? '@' + user.username : user.first_name ?? user.telegram_id))}</b>`,
     `🧩 Vai trò: <b>${owner ? 'OWNER' : 'USER'}</b>`,
     `📧 Mail của bạn: <b>${stats?.mailCount ?? '—'}</b>`,
     '',
@@ -35,6 +35,7 @@ export function mainMenu(user: BotUser, stats?: { mailCount?: number }) {
       { text: '📤 Export của tôi', callback_data: 'mail:export' }
     ],
     [
+      { text: '🧹 Dọn tin bot', callback_data: 'ui:cleanup' },
       { text: '❓ Hướng dẫn', callback_data: 'help' }
     ]
   ];
@@ -58,6 +59,7 @@ export function helpText() {
     '<code>email|refresh_token|client_id</code>',
     '',
     'Bot tự bỏ qua password và không lưu password.',
+    'Trước khi import, bot sẽ hiện preview để bạn xác nhận.',
     '',
     '<b>Luồng tối ưu:</b>',
     '1. Add mail',
@@ -65,7 +67,8 @@ export function helpText() {
     '3. Chọn đúng 1 mail',
     '4. Bấm Check Mail hoặc Làm mới',
     '',
-    `Rate limit mặc định: ${env.CHECK_COOLDOWN_SECONDS}s/lượt/mail, ${env.MAX_CHECK_PER_HOUR} lượt/giờ/user.`
+    `Rate limit mặc định: ${env.CHECK_COOLDOWN_SECONDS}s/lượt/mail, ${env.MAX_CHECK_PER_HOUR} lượt/giờ/user.`,
+    `Ghi mail thật: ${env.ENABLE_WRITE_ACTIONS ? 'ĐANG BẬT' : 'ĐANG TẮT'} — mặc định chỉ đọc mail để tránh lỗi scope.`
   ].join('\n');
 }
 
@@ -84,6 +87,25 @@ export function addMailPrompt() {
     '',
     'Gõ /cancel để huỷ.'
   ].join('\n');
+}
+
+
+export function importPreviewText(preview: ImportPreview) {
+  const lines = [
+    '📦 <b>PREVIEW IMPORT</b>',
+    '',
+    `✅ Dòng hợp lệ: <b>${preview.parse.valid.length}</b>`,
+    `🆕 Sẽ thêm mới: <b>${preview.willInsert}</b>`,
+    `⚠️ Đã tồn tại: <b>${preview.existingEmails.length}</b>`,
+    `⚠️ Trùng trong file: <b>${preview.parse.duplicatesInFile.length}</b>`,
+    `❌ Sai định dạng: <b>${preview.parse.invalid.length}</b>`,
+    `🚧 Vượt giới hạn: <b>${preview.overLimit}</b>`,
+    '',
+    'Bot sẽ không lưu password. Bấm xác nhận để import.'
+  ];
+  const invalid = preview.parse.invalid.slice(0, 4).map((x) => `• ${escapeHtml(x.reason)}: <code>${escapeHtml(x.line.slice(0, 60))}</code>`);
+  if (invalid.length) lines.push('', '<b>Lỗi mẫu:</b>', ...invalid);
+  return lines.join('\n');
 }
 
 export function importSummaryText(summary: ImportSummary) {
@@ -138,9 +160,10 @@ export function mailDetail(account: MailAccount) {
   ].filter(Boolean).join('\n');
 
   const reply_markup = keyboard([
-    [{ text: '🔍 Check Mail', callback_data: `mail:check:${account.id}` }, { text: '📩 Inbox gần đây', callback_data: `mail:inbox:${account.id}` }],
+    [{ text: '🔐 Lấy OTP mới nhất', callback_data: `mail:check:${account.id}` }, { text: '📩 Inbox gần đây', callback_data: `mail:inbox:${account.id}` }],
     [{ text: '🔁 Làm mới', callback_data: `mail:check:${account.id}` }, { text: '🗑 Xoá khỏi bot', callback_data: `mail:delete_confirm:${account.id}` }],
-    [{ text: '⬅️ Mail List', callback_data: 'mail:list:0' }, { text: '🏠 Menu', callback_data: 'home' }]
+    [{ text: '🧹 Dọn tin bot', callback_data: 'ui:cleanup' }, { text: '⬅️ Mail List', callback_data: 'mail:list:0' }],
+    [{ text: '🏠 Menu', callback_data: 'home' }]
   ]);
 
   return { text, reply_markup };
@@ -153,7 +176,9 @@ export function checkResultText(result: CheckResult) {
     `📧 <code>${escapeHtml(result.account.email)}</code>`,
     `⏱ ${fmtDate(result.checkedAt)}`,
     '',
-    escapeHtml(result.note)
+    escapeHtml(result.note),
+    '',
+    'Chống trùng: mail đã gửi sẽ không gửi lại ở lượt làm mới sau.'
   ];
 
   if (result.sent.length === 0 && result.latestPreview) {

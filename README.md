@@ -1,136 +1,99 @@
-# Outlook Mail Center Bot VIP v1.0
+# Outlook Mail Center Bot VIP v1.2
 
-Telegram bot quản lý mail Outlook/Hotmail theo mô hình tối ưu cho Vercel Free:
+Bot Telegram quản lý nhiều Outlook/Hotmail theo mô hình **OWNER / USER**, tối ưu cho Vercel Free + Supabase Free.
 
-- Chỉ có `OWNER` và `USER`.
-- Mỗi user có workspace mail riêng.
-- User tự add/check/export/xoá mail của chính họ.
-- OWNER chỉ quản lý user và broadcast hệ thống.
-- Không check all.
-- Không theo dõi liên tục.
-- Không giữ server chờ 5 phút.
-- Cơ chế chính là `Smart Pull Check`: chọn 1 mail → bấm Check Mail → lấy Inbox mới nhất → chống trùng bằng DB.
+## Điểm nâng cấp v1.2
 
-## 1. Stack
+- Fix lỗi Microsoft `AADSTS70000` do scope: mặc định chỉ dùng `offline_access Mail.Read`.
+- Không còn yêu cầu `Mail.ReadWrite` khi chỉ check mail/lấy OTP.
+- Nút đánh dấu đã đọc/xoá email thật bị ẩn mặc định. Chỉ bật khi `ENABLE_WRITE_ACTIONS=true` và refresh token có `Mail.ReadWrite`.
+- Import mail có bước preview trước khi lưu.
+- Thêm dọn dẹp tin nhắn thao tác với bot: `/clean` hoặc nút `🧹 Dọn tin bot`.
+- Thêm bảng `telegram_message_logs` để bot nhớ các tin đã gửi và xoá hàng loạt.
+- Giữ nguyên nguyên tắc: không check all, không theo dõi liên tục, user nào add mail thì mail đó thuộc user đó.
 
-- Next.js API Routes trên Vercel
-- Supabase Postgres
-- Telegram Bot Webhook
-- Microsoft Graph API
+## ENV cần có trên Vercel
 
-## 2. Tạo Supabase
+```env
+TELEGRAM_BOT_TOKEN=
+TELEGRAM_WEBHOOK_SECRET=thiphan123
+OWNER_TELEGRAM_ID=
+NEXT_PUBLIC_SUPABASE_URL=
+SUPABASE_SERVICE_ROLE_KEY=
+TOKEN_ENCRYPTION_KEY_HEX=
+CRON_SECRET=thiphanxyz
 
-1. Tạo project Supabase.
-2. Vào SQL Editor.
-3. Chạy file:
+MICROSOFT_GRAPH_SCOPES=offline_access Mail.Read
+ENABLE_WRITE_ACTIONS=false
 
-```sql
-supabase/schema.sql
+MAX_MAIL_PER_USER=100
+MAX_IMPORT_PER_BATCH=100
+CHECK_COOLDOWN_SECONDS=8
+MAX_CHECK_PER_HOUR=30
+FETCH_LATEST_MESSAGES=10
+MAX_RETURN_MESSAGES_PER_CHECK=3
+CLEANUP_MESSAGE_LIMIT=35
 ```
 
-## 3. Tạo ENV
-
-Copy `.env.example` thành `.env.local` khi chạy local hoặc set Environment Variables trên Vercel.
-
-```bash
-TELEGRAM_BOT_TOKEN=...
-TELEGRAM_WEBHOOK_SECRET=...
-OWNER_TELEGRAM_ID=...
-NEXT_PUBLIC_SUPABASE_URL=...
-SUPABASE_SERVICE_ROLE_KEY=...
-TOKEN_ENCRYPTION_KEY_HEX=...
-CRON_SECRET=...
-```
-
-Tạo encryption key:
+Tạo `TOKEN_ENCRYPTION_KEY_HEX`:
 
 ```bash
 openssl rand -hex 32
 ```
 
-## 4. Deploy Vercel
+## Reset Supabase SQL
+
+Nếu bạn muốn xoá sạch schema cũ:
+
+1. Chạy `supabase/reset_schema.sql`
+2. Chạy `supabase/schema.sql`
+
+Lưu ý: reset sẽ xoá dữ liệu bot cũ.
+
+## Deploy
 
 ```bash
-npm install
-npm run build
+git add .
+git commit -m "Upgrade Outlook Mail Center Bot v1.2"
+git push
 ```
 
-Sau khi deploy, set Telegram webhook:
+Vercel sẽ tự deploy lại repo GitHub.
+
+## Set webhook
 
 ```bash
 curl "https://api.telegram.org/bot$TELEGRAM_BOT_TOKEN/setWebhook?url=https://YOUR_DOMAIN.vercel.app/api/telegram?secret=$TELEGRAM_WEBHOOK_SECRET"
 ```
 
-## 5. Lệnh bot
+Kiểm tra:
 
-User:
-
-```text
-/start
-/addmail
-/listmail
-/export
-/cancel
+```bash
+curl "https://api.telegram.org/bot$TELEGRAM_BOT_TOKEN/getWebhookInfo"
 ```
 
-OWNER:
+## Dùng bot
 
-```text
-/adduser TELEGRAM_ID
-/revokeuser TELEGRAM_ID
-/restoreuser TELEGRAM_ID
-/listuser
-/broadcast
+- `/start` mở menu.
+- `/addmail` thêm mail hoặc upload file `.txt`.
+- `/listmail` chọn đúng 1 mail rồi check.
+- `/clean` dọn các tin bot/thao tác gần đây.
+- OWNER: `/adduser TELEGRAM_ID`, `/revokeuser TELEGRAM_ID`, `/listuser`, `/broadcast`.
+
+## Về Microsoft scope
+
+Bản v1.2 mặc định chỉ đọc mail:
+
+```env
+MICROSOFT_GRAPH_SCOPES=offline_access Mail.Read
+ENABLE_WRITE_ACTIONS=false
 ```
 
-## 6. Format add mail
+Nếu muốn đánh dấu đã đọc/xoá email thật, token Microsoft phải được cấp `Mail.ReadWrite`, sau đó đổi ENV:
 
-Bot chấp nhận 2 format:
-
-```text
-email|password|refresh_token|client_id
-email|refresh_token|client_id
+```env
+MICROSOFT_GRAPH_SCOPES=offline_access Mail.Read Mail.ReadWrite
+ENABLE_WRITE_ACTIONS=true
 ```
 
-Bot tự bỏ qua password và không lưu password.
-
-## 7. Cơ chế chống trùng
-
-Mỗi account lưu:
-
-- `last_seen_message_id`
-- `last_seen_received_at`
-
-Mỗi mail đã gửi về Telegram lưu trong bảng:
-
-- `processed_messages`
-
-Unique key:
-
-```sql
-unique(account_id, message_id)
-```
-
-Nhờ vậy user bấm Làm mới nhiều lần vẫn không nhận trùng mail cũ.
-
-## 8. Quyền riêng tư
-
-Mọi bảng mail đều có `owner_user_id`.
-
-Backend luôn check:
-
-```text
-account.owner_user_id === user.id
-```
-
-User khác không xem/thao tác mail của nhau. OWNER không có menu xem nội dung mail riêng tư của USER.
-
-## 9. Ghi chú Microsoft Graph
-
-Bot refresh access token bằng `refresh_token` + `client_id`, rồi gọi:
-
-```http
-GET /me/mailFolders/inbox/messages?$top=10&$orderby=receivedDateTime desc&$select=id,internetMessageId,from,subject,bodyPreview,receivedDateTime,isRead
-```
-
-Nếu token không có quyền `Mail.Read` hoặc `Mail.ReadWrite`, chức năng đọc/xoá/mark-read có thể lỗi. Khi đó cần cấp scope tương ứng lúc lấy refresh token.
+Nếu token chưa có `Mail.ReadWrite`, Microsoft sẽ báo scope unauthorized/expired.
